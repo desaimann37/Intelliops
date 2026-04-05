@@ -5,7 +5,7 @@ import requests
 import subprocess
 import json
 
-llm = ChatOllama(model="llama3.1", base_url="http://localhost:11434")
+llm = ChatOllama(model="llama3.1", base_url="http://172.26.231.242:11434")
 
 class CostOptimizerState(TypedDict):
     # Metrics
