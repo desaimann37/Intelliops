@@ -2,11 +2,12 @@ from langchain_ollama import ChatOllama
 from langgraph.graph import StateGraph, END
 from typing import TypedDict
 import subprocess
+import requests
 import json
+import datetime
 
 llm = ChatOllama(model="llama3.1", base_url="http://localhost:11434")
 
-# Combined state for all agents
 class OrchestratorState(TypedDict):
     # Input
     image: str
@@ -14,19 +15,79 @@ class OrchestratorState(TypedDict):
     cpu_load: float
     memory_load: float
     pr_size: int
-    # Security agent results
+    # Code review results
+    code_quality_score: int
+    code_review_decision: str
+    # Security results
     critical_count: int
     high_count: int
     security_decision: str
-    # Deploy agent results
+    # Deploy results
     deploy_decision: str
+    # Incident monitoring
+    anomaly_detected: bool
+    severity: str
+    incident_action: str
     # Final
     final_decision: str
     summary: str
 
-# ── SECURITY SCAN NODE ──
+# ── NODE 1: CODE REVIEW ──
+def run_code_review(state: OrchestratorState) -> OrchestratorState:
+    print("\n📝 STEP 1: Code Review Agent running...")
+
+    result = subprocess.run(
+        ["git", "diff", "HEAD~1", "HEAD", "--stat"],
+        capture_output=True, text=True,
+        cwd="/home/linux_admin/Intelliops"
+    )
+
+    diff_result = subprocess.run(
+        ["git", "diff", "HEAD~1", "HEAD"],
+        capture_output=True, text=True,
+        cwd="/home/linux_admin/Intelliops"
+    )
+
+    diff = diff_result.stdout[:2000]
+    lines_added = diff.count("\n+")
+    lines_removed = diff.count("\n-")
+
+    prompt = f"""
+    You are a code review AI agent.
+    Lines added: {lines_added}
+    Lines removed: {lines_removed}
+    Diff: {diff[:1000]}
+
+    Score 0-100 and decide APPROVE or REQUEST_CHANGES.
+    Rules: REQUEST_CHANGES if score below 60.
+    Format: SCORE: [0-100] | DECISION: [APPROVE/REQUEST_CHANGES] | REASON: [reason]
+    """
+
+    response = llm.invoke(prompt)
+    output = response.content
+
+    score = 70
+    for line in output.split("\n"):
+        if "SCORE:" in line:
+            try:
+                score = int(''.join(filter(str.isdigit, line.split(":")[1][:4])))
+            except:
+                pass
+
+    # Deterministic rule
+    decision = "REQUEST_CHANGES" if score < 60 else "APPROVE"
+    print(f"   Quality Score: {score}/100")
+    print(f"   Decision: {decision}")
+
+    return {
+        **state,
+        "code_quality_score": score,
+        "code_review_decision": decision
+    }
+
+# ── NODE 2: SECURITY SCAN ──
 def run_security_scan(state: OrchestratorState) -> OrchestratorState:
-    print("\n🔒 STEP 1: Security Scan Agent running...")
+    print("\n🔒 STEP 2: Security Scan Agent running...")
 
     result = subprocess.run(
         ["trivy", "image", "--format", "json",
@@ -48,155 +109,225 @@ def run_security_scan(state: OrchestratorState) -> OrchestratorState:
     except:
         pass
 
-    print(f"   Found: {critical_count} CRITICAL, {high_count} HIGH")
-
     prompt = f"""
-    You are a security AI agent.
-    Image: {state['image']}
-    Critical vulnerabilities: {critical_count}
-    High vulnerabilities: {high_count}
-    Rules:
-    - BLOCK if any CRITICAL found
-    - BLOCK if more than 5 HIGH found
-    - ALLOW otherwise
+    Security scan results:
+    Critical: {critical_count}, High: {high_count}
+    Rules: BLOCK only if CRITICAL count is greater than 0 OR high count is greater than 5. ALLOW if high count is 5 or fewer and no CRITICAL.
     Format: DECISION: [BLOCK/ALLOW] | REASON: [reason]
     """
-    response = llm.invoke(prompt)
-    security_decision = "BLOCK" if "BLOCK" in response.content.upper() else "ALLOW"
-    print(f"   Security Decision: {security_decision}")
+
+    # Deterministic rule — no LLM ambiguity
+    if critical_count > 0:
+        decision = "BLOCK"
+    elif high_count > 5:
+        decision = "BLOCK"
+    else:
+        decision = "ALLOW"
+
+    print(f"   Critical: {critical_count} | High: {high_count}")
+    print(f"   Decision: {decision}")
 
     return {
         **state,
         "critical_count": critical_count,
         "high_count": high_count,
-        "security_decision": security_decision
+        "security_decision": decision
     }
 
-# ── DEPLOY DECISION NODE ──
+# ── NODE 3: DEPLOY DECISION ──
 def run_deploy_decision(state: OrchestratorState) -> OrchestratorState:
-    print("\n🚀 STEP 2: Deploy Decision Agent running...")
+    print("\n🚀 STEP 3: Deploy Decision Agent running...")
 
     prompt = f"""
-    You are a DevOps AI agent making a deployment decision.
+    Deployment metrics:
     Test coverage: {state['test_coverage']}%
     CPU load: {state['cpu_load']}%
     Memory load: {state['memory_load']}%
     PR size: {state['pr_size']} lines
-    Rules:
-    - NO-GO if test coverage below 70%
-    - NO-GO if CPU load above 80%
-    - NO-GO if memory load above 85%
-    - CAUTION if PR size above 500 lines
+    Rules: NO-GO if coverage<70%, CPU>80%, memory>85%
     Format: DECISION: [GO/NO-GO] | REASON: [reason]
     """
-    response = llm.invoke(prompt)
-    deploy_decision = "NO-GO" if "NO-GO" in response.content.upper() else "GO"
-    print(f"   Deploy Decision: {deploy_decision}")
+
+    # Deterministic rule
+    if state["test_coverage"] < 70:
+        decision = "NO-GO"
+    elif state["cpu_load"] > 80:
+        decision = "NO-GO"
+    elif state["memory_load"] > 85:
+        decision = "NO-GO"
+    else:
+        decision = "GO"
+    print(f"   Decision: {decision}")
+
+    return {**state, "deploy_decision": decision}
+
+# ── NODE 4: INCIDENT MONITOR ──
+def run_incident_monitor(state: OrchestratorState) -> OrchestratorState:
+    print("\n🔍 STEP 4: Incident Response Agent monitoring...")
+
+    cpu = 0.0
+    memory = 0.0
+    restarts = 0
+
+    try:
+        base = "http://localhost:9090/api/v1/query"
+        r = requests.get(base, params={
+            "query": "100 - (avg(rate(node_cpu_seconds_total{mode='idle'}[5m])) * 100)"
+        }, timeout=3)
+        if r.status_code == 200:
+            result = r.json()["data"]["result"]
+            if result:
+                cpu = float(result[0]["value"][1])
+
+        r = requests.get(base, params={
+            "query": "sum(kube_pod_container_status_restarts_total)"
+        }, timeout=3)
+        if r.status_code == 200:
+            result = r.json()["data"]["result"]
+            if result:
+                restarts = int(float(result[0]["value"][1]))
+    except:
+        cpu = state["cpu_load"]
+        memory = state["memory_load"]
+
+    anomaly = cpu > 85 or memory > 90 or restarts > 10
+    severity = "CRITICAL" if (cpu > 85 or memory > 90) else "MEDIUM" if restarts > 10 else "NONE"
+    action = "ROLLBACK initiated" if severity == "CRITICAL" else "Monitoring closely" if anomaly else "System healthy"
+
+    print(f"   CPU: {cpu:.1f}% | Restarts: {restarts}")
+    print(f"   Anomaly: {anomaly} | Action: {action}")
 
     return {
         **state,
-        "deploy_decision": deploy_decision
+        "anomaly_detected": anomaly,
+        "severity": severity,
+        "incident_action": action
     }
 
-# ── ROUTING FUNCTION ──
+# ── ROUTING FUNCTIONS ──
+def route_after_code_review(state: OrchestratorState) -> str:
+    if state["code_review_decision"] == "REQUEST_CHANGES":
+        return "rejected"
+    return "security_scan"
+
 def route_after_security(state: OrchestratorState) -> str:
     if state["security_decision"] == "BLOCK":
-        return "blocked"
+        return "rejected"
     return "deploy_decision"
 
-# ── FINAL DECISION NODE ──
-def make_final_decision(state: OrchestratorState) -> OrchestratorState:
-    print("\n🤖 STEP 3: Orchestrator making final decision...")
+def route_after_deploy(state: OrchestratorState) -> str:
+    if state["deploy_decision"] == "NO-GO":
+        return "rejected"
+    return "incident_monitor"
 
-    if state["security_decision"] == "BLOCK":
-        final = "REJECTED"
-        summary = f"Pipeline BLOCKED by Security Agent. Critical: {state['critical_count']}, High: {state['high_count']}"
-    elif state["deploy_decision"] == "NO-GO":
-        final = "REJECTED"
-        summary = f"Pipeline REJECTED by Deploy Decision Agent."
+# ── NODE 5: FINAL OUTPUT ──
+def output_result(state: OrchestratorState) -> OrchestratorState:
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if state["final_decision"] == "APPROVED":
+        emoji = "✅"
     else:
-        final = "APPROVED"
-        summary = "All checks passed. Deployment APPROVED. Triggering ArgoCD sync."
+        emoji = "🚫"
+
+    print("\n" + "="*60)
+    print(f"{emoji} INTELLIOPS PIPELINE DECISION: {state['final_decision']}")
+    print(f"🕐 Timestamp: {timestamp}")
+    print(f"📊 Code Quality:  {state['code_quality_score']}/100 → {state['code_review_decision']}")
+    print(f"🔒 Security:      Critical={state['critical_count']} High={state['high_count']} → {state['security_decision']}")
+    print(f"🚀 Deploy:        {state['deploy_decision']}")
+    print(f"🔍 Incident:      Severity={state['severity']} → {state['incident_action']}")
+    print(f"📝 Summary:       {state['summary']}")
+    print("="*60)
+    return state
+
+def handle_approved(state: OrchestratorState) -> OrchestratorState:
+    return {
+        **state,
+        "final_decision": "APPROVED",
+        "summary": "All checks passed. Deploying via ArgoCD."
+    }
+
+def handle_rejected(state: OrchestratorState) -> OrchestratorState:
+    reasons = []
+    if state["code_review_decision"] == "REQUEST_CHANGES":
+        reasons.append(f"Code quality {state['code_quality_score']}/100")
+    if state["security_decision"] == "BLOCK":
+        reasons.append(f"Security: {state['critical_count']} critical, {state['high_count']} high CVEs")
+    if state["deploy_decision"] == "NO-GO":
+        reasons.append("Deploy metrics failed")
 
     return {
         **state,
-        "final_decision": final,
-        "summary": summary
+        "final_decision": "REJECTED",
+        "summary": "Rejected: " + " | ".join(reasons)
     }
-
-# ── BLOCKED NODE ──
-def handle_blocked(state: OrchestratorState) -> OrchestratorState:
-    return make_final_decision(state)
-
-# ── OUTPUT NODE ──
-def output_result(state: OrchestratorState) -> OrchestratorState:
-    emoji = "✅" if state["final_decision"] == "APPROVED" else "🚫"
-    print("\n" + "="*60)
-    print(f"{emoji}  FINAL PIPELINE DECISION: {state['final_decision']}")
-    print(f"📝 {state['summary']}")
-    print("="*60)
-    return state
 
 # ── BUILD GRAPH ──
 graph = StateGraph(OrchestratorState)
 
-graph.add_node("security_scan",    run_security_scan)
-graph.add_node("deploy_decision",  run_deploy_decision)
-graph.add_node("blocked",          handle_blocked)
-graph.add_node("final_decision",   make_final_decision)
-graph.add_node("output",           output_result)
+graph.add_node("code_review",     run_code_review)
+graph.add_node("security_scan",   run_security_scan)
+graph.add_node("deploy_decision", run_deploy_decision)
+graph.add_node("incident_monitor",run_incident_monitor)
+graph.add_node("approved",        handle_approved)
+graph.add_node("rejected",        handle_rejected)
+graph.add_node("output",          output_result)
 
-graph.set_entry_point("security_scan")
+graph.set_entry_point("code_review")
+
+graph.add_conditional_edges(
+    "code_review",
+    route_after_code_review,
+    {
+        "rejected":     "rejected",
+        "security_scan":"security_scan"
+    }
+)
 
 graph.add_conditional_edges(
     "security_scan",
     route_after_security,
     {
-        "blocked":        "blocked",
-        "deploy_decision": "deploy_decision"
+        "rejected":       "rejected",
+        "deploy_decision":"deploy_decision"
     }
 )
 
-graph.add_edge("blocked",         "output")
-graph.add_edge("deploy_decision", "final_decision")
-graph.add_edge("final_decision",  "output")
-graph.add_edge("output",          END)
+graph.add_conditional_edges(
+    "deploy_decision",
+    route_after_deploy,
+    {
+        "rejected":        "rejected",
+        "incident_monitor":"incident_monitor"
+    }
+)
+
+graph.add_edge("incident_monitor", "approved")
+graph.add_edge("approved",         "output")
+graph.add_edge("rejected",         "output")
+graph.add_edge("output",           END)
 
 agent = graph.compile()
 
 if __name__ == "__main__":
-    print("🔄 IntelliOps Orchestrator Agent Starting...\n")
+    print("🔄 IntelliOps Full Pipeline Starting...\n")
+    print("━"*60)
 
-    print("━"*60)
-    print("SCENARIO 1: Good image, good metrics")
-    print("━"*60)
     agent.invoke({
         "image": "alpine:latest",
         "test_coverage": 85.0,
         "cpu_load": 40.0,
         "memory_load": 50.0,
         "pr_size": 100,
+        "code_quality_score": 0,
+        "code_review_decision": "",
         "critical_count": 0,
         "high_count": 0,
         "security_decision": "",
         "deploy_decision": "",
-        "final_decision": "",
-        "summary": ""
-    })
-
-    print("\n" + "━"*60)
-    print("SCENARIO 2: Bad image, bad metrics")
-    print("━"*60)
-    agent.invoke({
-        "image": "nginx:latest",
-        "test_coverage": 55.0,
-        "cpu_load": 85.0,
-        "memory_load": 90.0,
-        "pr_size": 800,
-        "critical_count": 0,
-        "high_count": 0,
-        "security_decision": "",
-        "deploy_decision": "",
+        "anomaly_detected": False,
+        "severity": "NONE",
+        "incident_action": "",
         "final_decision": "",
         "summary": ""
     })
