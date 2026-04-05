@@ -3,6 +3,7 @@ pipeline {
 
     environment {
         IMAGE = "alpine:latest"
+        OLLAMA_HOST = "http://host-gateway:11434"
     }
 
     stages {
@@ -17,8 +18,13 @@ pipeline {
             steps {
                 echo '🔧 Setting up Python environment...'
                 sh '''
-                    python3 --version || apt-get install -y python3 python3-pip
-                    pip3 install -q langchain langchain-ollama langgraph requests 2>/dev/null || true
+                    python3 --version
+                    pip3 install --break-system-packages -q \
+                        langchain \
+                        langchain-ollama \
+                        langgraph \
+                        requests
+                    echo "✅ Dependencies installed"
                 '''
             }
         }
@@ -27,7 +33,6 @@ pipeline {
             steps {
                 echo '🤖 Running all 5 AI agents...'
                 sh '''
-                    pip3 install -q langchain langchain-ollama langgraph requests
                     python3 agents/orchestrator.py
                 '''
             }
