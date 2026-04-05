@@ -36,16 +36,19 @@ class OrchestratorState(TypedDict):
 def run_code_review(state: OrchestratorState) -> OrchestratorState:
     print("\n📝 STEP 1: Code Review Agent running...")
 
+    # Dynamically detect repo path
+    repo_path = os.environ.get("WORKSPACE", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
     result = subprocess.run(
         ["git", "diff", "HEAD~1", "HEAD", "--stat"],
         capture_output=True, text=True,
-        cwd="/home/linux_admin/Intelliops"
+        cwd=repo_path
     )
 
     diff_result = subprocess.run(
         ["git", "diff", "HEAD~1", "HEAD"],
         capture_output=True, text=True,
-        cwd="/home/linux_admin/Intelliops"
+        cwd=repo_path
     )
 
     diff = diff_result.stdout[:2000]

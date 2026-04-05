@@ -23,14 +23,14 @@ def get_git_diff(state: CodeReviewState) -> CodeReviewState:
         ["git", "diff", "HEAD~1", "HEAD", "--stat"],
         capture_output=True,
         text=True,
-        cwd="/home/linux_admin/Intelliops"
+        cwd=os.environ.get("WORKSPACE", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     )
 
     diff_result = subprocess.run(
         ["git", "diff", "HEAD~1", "HEAD"],
         capture_output=True,
         text=True,
-        cwd="/home/linux_admin/Intelliops"
+        cwd=os.environ.get("WORKSPACE", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     )
 
     diff = diff_result.stdout[:3000]
