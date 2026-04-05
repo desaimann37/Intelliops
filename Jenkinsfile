@@ -1,56 +1,77 @@
 pipeline {
     agent any
 
+    environment {
+        IMAGE = "alpine:latest"
+        VENV_PATH = "/home/linux_admin/Intelliops/venv"
+        PROJECT_PATH = "/home/linux_admin/Intelliops"
+    }
+
     stages {
         stage('Checkout') {
             steps {
-                echo 'Cloning repository...'
+                echo '📥 Cloning repository...'
                 checkout scm
             }
         }
 
-        stage('Code Review') {
+        stage('Setup Environment') {
             steps {
-                echo 'Running code quality checks...'
-                sh 'echo "Code review agent will run here"'
+                echo '🔧 Setting up Python environment...'
+                sh '''
+                    cd ${PROJECT_PATH}
+                    source ${VENV_PATH}/bin/activate
+                    pip install -q langchain langchain-ollama langgraph requests
+                '''
             }
         }
 
-        stage('Security Scan') {
+        stage('IntelliOps Agent Pipeline') {
             steps {
-                echo 'Running security scan...'
-                sh 'echo "Security scan agent will run here"'
+                echo '🤖 Running all 5 AI agents...'
+                sh '''
+                    cd ${PROJECT_PATH}
+                    source ${VENV_PATH}/bin/activate
+                    python3 agents/orchestrator.py
+                '''
             }
         }
 
-        stage('Build') {
+        stage('Deploy via ArgoCD') {
+            when {
+                expression {
+                    return currentBuild.result == null
+                }
+            }
             steps {
-                echo 'Building application...'
-                sh 'echo "Docker build will happen here"'
+                echo '🚀 Triggering ArgoCD sync...'
+                sh '''
+                    kubectl get applications -n argocd
+                '''
             }
         }
 
-        stage('Deploy Decision') {
+        stage('Cost Optimization Check') {
             steps {
-                echo 'Making deploy decision...'
-                sh 'echo "Deploy decision agent will run here"'
-            }
-        }
-
-        stage('Deploy') {
-            steps {
-                echo 'Deploying to Kubernetes via ArgoCD...'
-                sh 'echo "ArgoCD sync will happen here"'
+                echo '💰 Running Cost Optimizer Agent...'
+                sh '''
+                    cd ${PROJECT_PATH}
+                    source ${VENV_PATH}/bin/activate
+                    python3 agents/cost_optimizer_agent.py
+                '''
             }
         }
     }
 
     post {
         success {
-            echo 'Pipeline succeeded!'
+            echo '✅ IntelliOps Pipeline APPROVED - Deployment successful!'
         }
         failure {
-            echo 'Pipeline failed! Incident response agent will trigger.'
+            echo '🚫 IntelliOps Pipeline REJECTED - Deployment blocked!'
+        }
+        always {
+            echo '📊 Pipeline complete. Check Grafana for metrics.'
         }
     }
 }
