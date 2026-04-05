@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IntelliOps Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #0f1117;
+    color: #e2e8f0;
+    min-height: 100vh;
+  }
+  .header {
+    background: #1a1d2e;
+    border-bottom: 1px solid #2d3748;
+    padding: 16px 32px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .header h1 {
+    font-size: 22px;
+    font-weight: 600;
+    color: #63b3ed;
+  }
+  .header .subtitle {
+    font-size: 13px;
+    color: #718096;
+    margin-top: 2px;
+  }
+  .status-badge {
+    background: #276749;
+    color: #9ae6b4;
+    padding: 6px 14px;
+    border-radius: 20px;
+    font-size: 13px;
+    font-weight: 500;
+  }
+  .container { padding: 24px 32px; }
+  .grid-4 {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+  .card {
+    background: #1a1d2e;
+    border: 1px solid #2d3748;
+    border-radius: 12px;
+    padding: 20px;
+  }
+  .card-title {
+    font-size: 12px;
+    color: #718096;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-bottom: 12px;
+    font-weight: 600;
+  }
+  .metric-value {
+    font-size: 32px;
+    font-weight: 700;
+    color: #e2e8f0;
+  }
+  .metric-unit {
+    font-size: 14px;
+    color: #718096;
+    margin-left: 4px;
+  }
+  .metric-label {
+    font-size: 12px;
+    color: #718096;
+    margin-top: 6px;
+  }
+  .progress-bar {
+    background: #2d3748;
+    border-radius: 4px;
+    height: 6px;
+    margin-top: 10px;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s ease;
+  }
+  .fill-blue   { background: #4299e1; }
+  .fill-green  { background: #48bb78; }
+  .fill-orange { background: #ed8936; }
+  .fill-red    { background: #fc8181; }
+  .fill-purple { background: #9f7aea; }
+
+  .agent-card {
+    background: #1a1d2e;
+    border: 1px solid #2d3748;
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .agent-icon { font-size: 28px; }
+  .agent-name { font-size: 13px; font-weight: 600; color: #e2e8f0; }
+  .agent-detail { font-size: 11px; color: #718096; margin-top: 2px; }
+  .agent-decision {
+    margin-left: auto;
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .decision-success { background: #276749; color: #9ae6b4; }
+  .decision-warning { background: #744210; color: #fbd38d; }
+  .decision-error   { background: #742a2a; color: #feb2b2; }
+
+  .pipeline-stage {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 0;
+    border-bottom: 1px solid #2d3748;
+  }
+  .pipeline-stage:last-child { border-bottom: none; }
+  .stage-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot-success { background: #48bb78; }
+  .dot-warning { background: #ed8936; }
+  .dot-error   { background: #fc8181; }
+  .stage-name  { font-size: 13px; color: #e2e8f0; flex: 1; }
+  .stage-time  { font-size: 12px; color: #718096; }
+  .stage-status { font-size: 12px; font-weight: 600; color: #48bb78; }
+
+  .model-card {
+    background: #1a1d2e;
+    border: 1px solid #2d3748;
+    border-radius: 10px;
+    padding: 16px;
+  }
+  .model-name { font-size: 13px; font-weight: 600; color: #63b3ed; }
+  .model-version { font-size: 11px; color: #718096; margin-top: 4px; }
+  .model-metric { font-size: 20px; font-weight: 700; color: #e2e8f0; margin-top: 8px; }
+  .model-metric-label { font-size: 11px; color: #718096; }
+
+  .section-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: #e2e8f0;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .final-decision {
+    background: linear-gradient(135deg, #276749, #2c5282);
+    border: 1px solid #48bb78;
+    border-radius: 12px;
+    padding: 20px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 24px;
+  }
+  .final-decision-text { font-size: 18px; font-weight: 700; color: #9ae6b4; }
+  .final-decision-sub  { font-size: 13px; color: #68d391; margin-top: 4px; }
+  .final-decision-time { font-size: 12px; color: #9ae6b4; }
+
+  .refresh-btn {
+    background: #2d3748;
+    border: 1px solid #4a5568;
+    color: #e2e8f0;
+    padding: 8px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    transition: background 0.2s;
+  }
+  .refresh-btn:hover { background: #4a5568; }
+  .cost-saving {
+    color: #48bb78;
+    font-size: 24px;
+    font-weight: 700;
+  }
+  .rec-item {
+    font-size: 12px;
+    color: #a0aec0;
+    padding: 6px 0;
+    border-bottom: 1px solid #2d3748;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .rec-item:last-child { border-bottom: none; }
+  .timestamp {
+    font-size: 11px;
+    color: #4a5568;
+    margin-top: 4px;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>⚡ IntelliOps Dashboard</h1>
+    <div class="subtitle">AI-Native DevOps Platform — Multi-Agent Orchestration</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;">
+    <span id="last-updated" style="font-size:12px;color:#4a5568;"></span>
+    <button class="refresh-btn" onclick="loadAll()">↻ Refresh</button>
+    <span class="status-badge">● All Systems Operational</span>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- FINAL DECISION BANNER -->
+  <div class="final-decision" id="decision-banner">
+    <div>
+      <div class="final-decision-text">✅ Pipeline Decision: APPROVED</div>
+      <div class="final-decision-sub">All 5 agents passed — Deployed via ArgoCD</div>
+    </div>
+    <div class="final-decision-time" id="decision-time"></div>
+  </div>
+
+  <!-- CLUSTER METRICS -->
+  <div class="section-title">🖥️ Cluster Health</div>
+  <div class="grid-4" id="cluster-metrics">
+    <div class="card">
+      <div class="card-title">CPU Usage</div>
+      <div class="metric-value" id="cpu-val">--<span class="metric-unit">%</span></div>
+      <div class="progress-bar"><div class="progress-fill fill-blue" id="cpu-bar" style="width:0%"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Memory Usage</div>
+      <div class="metric-value" id="mem-val">--<span class="metric-unit">%</span></div>
+      <div class="progress-bar"><div class="progress-fill fill-purple" id="mem-bar" style="width:0%"></div></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Running Pods</div>
+      <div class="metric-value" id="pod-val">--</div>
+      <div class="metric-label">across all namespaces</div>
+    </div>
+    <div class="card">
+      <div class="card-title">Pod Restarts</div>
+      <div class="metric-value" id="restart-val">--</div>
+      <div class="metric-label">since cluster start</div>
+    </div>
+  </div>
+
+  <!-- AGENTS + PIPELINE -->
+  <div class="grid-2">
+    <!-- AGENTS -->
+    <div>
+      <div class="section-title">🤖 Agent Decisions</div>
+      <div id="agents-list" style="display:flex;flex-direction:column;gap:10px;"></div>
+    </div>
+
+    <!-- PIPELINE -->
+    <div>
+      <div class="section-title">🔧 Jenkins Pipeline</div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;margin-bottom:16px;">
+          <div>
+            <div style="font-size:13px;color:#718096;">Build</div>
+            <div style="font-size:20px;font-weight:700;" id="build-num">#--</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:13px;color:#718096;">Duration</div>
+            <div style="font-size:20px;font-weight:700;" id="build-dur">--s</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:13px;color:#718096;">Status</div>
+            <div style="font-size:13px;font-weight:600;color:#48bb78;" id="build-status">--</div>
+          </div>
+        </div>
+        <div id="pipeline-stages"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ML MODELS + COSTS -->
+  <div class="grid-2">
+    <!-- ML MODELS -->
+    <div>
+      <div class="section-title">🧠 ML Models (MLflow Registry)</div>
+      <div id="models-list" style="display:flex;flex-direction:column;gap:10px;"></div>
+    </div>
+
+    <!-- COSTS -->
+    <div>
+      <div class="section-title">💰 Cost Optimization</div>
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;margin-bottom:16px;">
+          <div>
+            <div style="font-size:12px;color:#718096;">Current Monthly</div>
+            <div class="metric-value" style="font-size:24px;" id="cost-current">--</div>
+          </div>
+          <div style="text-align:right;">
+            <div style="font-size:12px;color:#718096;">Savings Potential</div>
+            <div class="cost-saving" id="cost-savings">--</div>
+          </div>
+        </div>
+        <div style="font-size:12px;color:#718096;margin-bottom:8px;">Recommendations:</div>
+        <div id="cost-recs"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ARGOCD -->
+  <div class="section-title">🔄 ArgoCD Applications</div>
+  <div class="card" id="argocd-apps"></div>
+
+</div>
+
+<script>
+const API = "http://localhost:8084";
+
+async function fetchData(endpoint) {
+  try {
+    const r = await fetch(API + endpoint);
+    return await r.json();
+  } catch(e) {
+    console.error("API error:", endpoint, e);
+    return null;
+  }
+}
+
+async function loadCluster() {
+  const data = await fetchData("/api/cluster");
+  if (!data) return;
+  document.getElementById("cpu-val").innerHTML = data.cpu_usage + '<span class="metric-unit">%</span>';
+  document.getElementById("mem-val").innerHTML = data.memory_usage + '<span class="metric-unit">%</span>';
+  document.getElementById("pod-val").textContent = data.pod_count;
+  document.getElementById("restart-val").textContent = data.pod_restarts;
+  document.getElementById("cpu-bar").style.width = data.cpu_usage + "%";
+  document.getElementById("mem-bar").style.width = data.memory_usage + "%";
+}
+
+async function loadAgents() {
+  const data = await fetchData("/api/agents");
+  if (!data) return;
+
+  document.getElementById("decision-time").textContent =
+    new Date(data.timestamp).toLocaleTimeString();
+
+  const list = document.getElementById("agents-list");
+  list.innerHTML = data.agents.map(a => `
+    <div class="agent-card">
+      <div class="agent-icon">${a.icon}</div>
+      <div>
+        <div class="agent-name">${a.name}</div>
+        <div class="agent-detail">${a.detail}</div>
+        <div class="agent-detail" style="margin-top:2px;color:#63b3ed;">${a.score}</div>
+      </div>
+      <div class="agent-decision decision-${a.status}">${a.decision}</div>
+    </div>
+  `).join("");
+}
+
+async function loadPipeline() {
+  const data = await fetchData("/api/pipeline");
+  if (!data) return;
+
+  document.getElementById("build-num").textContent = "#" + data.build_number;
+  document.getElementById("build-dur").textContent = data.duration_secs + "s";
+  document.getElementById("build-status").textContent = data.last_build;
+
+  document.getElementById("pipeline-stages").innerHTML = data.stages.map(s => `
+    <div class="pipeline-stage">
+      <div class="stage-dot dot-success"></div>
+      <div class="stage-name">${s.name}</div>
+      <div class="stage-time">${s.duration}s</div>
+      <div class="stage-status">✓</div>
+    </div>
+  `).join("");
+}
+
+async function loadModels() {
+  const data = await fetchData("/api/models");
+  if (!data) return;
+
+  const metricLabels = {
+    "deploy-risk-classifier": ["accuracy", "Accuracy"],
+    "anomaly-detector":       ["accuracy", "Accuracy"],
+    "cost-forecaster":        ["mae", "MAE ($)"]
+  };
+
+  const icons = {
+    "deploy-risk-classifier": "🚀",
+    "anomaly-detector":       "🔍",
+    "cost-forecaster":        "💰"
+  };
+
+  document.getElementById("models-list").innerHTML = data.experiments.map(e => {
+    const [key, label] = metricLabels[e.name] || ["accuracy", "Score"];
+    const val = e.best_metric[key] !== undefined
+      ? (key === "accuracy" ? (e.best_metric[key]*100).toFixed(1)+"%" : "$"+e.best_metric[key])
+      : "N/A";
+    return `
+      <div class="model-card">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <div>
+            <div class="model-name">${icons[e.name] || "🧠"} ${e.name}</div>
+            <div class="model-version">${e.runs} experiments tracked</div>
+          </div>
+          <div style="text-align:right;">
+            <div class="model-metric">${val}</div>
+            <div class="model-metric-label">${label}</div>
+          </div>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function loadCosts() {
+  const data = await fetchData("/api/costs");
+  if (!data) return;
+
+  document.getElementById("cost-current").textContent = "$" + data.current_monthly;
+  document.getElementById("cost-savings").textContent = "$" + data.savings_potential;
+
+  document.getElementById("cost-recs").innerHTML = data.recommendations.map(r => `
+    <div class="rec-item">💡 ${r}</div>
+  `).join("");
+}
+
+async function loadArgoCD() {
+  const data = await fetchData("/api/argocd");
+  if (!data) return;
+
+  document.getElementById("argocd-apps").innerHTML = data.applications.map(a => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;">
+      <div>
+        <div style="font-size:14px;font-weight:600;">${a.name}</div>
+        <div style="font-size:12px;color:#718096;">${a.repo} → ${a.namespace}</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <span style="background:#276749;color:#9ae6b4;padding:3px 10px;border-radius:12px;font-size:12px;">
+          ● ${a.status}
+        </span>
+        <span style="background:#2c5282;color:#90cdf4;padding:3px 10px;border-radius:12px;font-size:12px;">
+          ⟳ ${a.sync}
+        </span>
+        <span style="font-size:11px;color:#4a5568;">
+          ${new Date(a.last_sync).toLocaleTimeString()}
+        </span>
+      </div>
+    </div>
+  `).join("");
+}
+
+async function loadAll() {
+  document.getElementById("last-updated").textContent =
+    "Updated: " + new Date().toLocaleTimeString();
+  await Promise.all([
+    loadCluster(),
+    loadAgents(),
+    loadPipeline(),
+    loadModels(),
+    loadCosts(),
+    loadArgoCD()
+  ]);
+}
+
+// Auto refresh every 30 seconds
+loadAll();
+setInterval(loadAll, 30000);
+</script>
+</body>
+</html>
