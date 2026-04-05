@@ -3,7 +3,8 @@ pipeline {
 
     environment {
         IMAGE = "alpine:latest"
-        OLLAMA_HOST = "http://host-gateway:11434"
+        ARGOCD_SERVER = "argocd-server.argocd.svc.cluster.local"
+        ARGOCD_APP = "nginx-app"
     }
 
     stages {
@@ -33,7 +34,48 @@ pipeline {
             steps {
                 echo '🤖 Running all 5 AI agents...'
                 sh '''
-                    python3 agents/orchestrator.py
+                    python3 agents/orchestrator.py > /tmp/agent_result.txt 2>&1
+                    cat /tmp/agent_result.txt
+                    if grep -q "FINAL PIPELINE DECISION: APPROVED" /tmp/agent_result.txt; then
+                        echo "APPROVED" > /tmp/decision.txt
+                    else
+                        echo "REJECTED" > /tmp/decision.txt
+                    fi
+                '''
+            }
+        }
+
+        stage('Deploy via ArgoCD') {
+            when {
+                expression {
+                    return sh(
+                        script: 'cat /tmp/decision.txt',
+                        returnStdout: true
+                    ).trim() == 'APPROVED'
+                }
+            }
+            steps {
+                echo '🚀 Triggering ArgoCD sync...'
+                sh '''
+                    # Login to ArgoCD
+                    argocd login ${ARGOCD_SERVER} \
+                        --username admin \
+                        --password $(kubectl get secret argocd-initial-admin-secret \
+                            -n argocd \
+                            -o jsonpath="{.data.password}" | base64 -d) \
+                        --insecure \
+                        --grpc-web
+
+                    # Sync the application
+                    argocd app sync ${ARGOCD_APP} --grpc-web
+
+                    # Wait for healthy status
+                    argocd app wait ${ARGOCD_APP} \
+                        --health \
+                        --timeout 120 \
+                        --grpc-web
+
+                    echo "✅ ArgoCD sync complete - ${ARGOCD_APP} is healthy"
                 '''
             }
         }
