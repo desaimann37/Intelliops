@@ -3,8 +3,6 @@ pipeline {
 
     environment {
         IMAGE = "alpine:latest"
-        VENV_PATH = "/home/linux_admin/Intelliops/venv"
-        PROJECT_PATH = "/home/linux_admin/Intelliops"
     }
 
     stages {
@@ -19,9 +17,8 @@ pipeline {
             steps {
                 echo '🔧 Setting up Python environment...'
                 sh '''
-                    cd ${PROJECT_PATH}
-                    source ${VENV_PATH}/bin/activate
-                    pip install -q langchain langchain-ollama langgraph requests
+                    python3 --version || apt-get install -y python3 python3-pip
+                    pip3 install -q langchain langchain-ollama langgraph requests 2>/dev/null || true
                 '''
             }
         }
@@ -30,23 +27,8 @@ pipeline {
             steps {
                 echo '🤖 Running all 5 AI agents...'
                 sh '''
-                    cd ${PROJECT_PATH}
-                    source ${VENV_PATH}/bin/activate
+                    pip3 install -q langchain langchain-ollama langgraph requests
                     python3 agents/orchestrator.py
-                '''
-            }
-        }
-
-        stage('Deploy via ArgoCD') {
-            when {
-                expression {
-                    return currentBuild.result == null
-                }
-            }
-            steps {
-                echo '🚀 Triggering ArgoCD sync...'
-                sh '''
-                    kubectl get applications -n argocd
                 '''
             }
         }
@@ -55,8 +37,6 @@ pipeline {
             steps {
                 echo '💰 Running Cost Optimizer Agent...'
                 sh '''
-                    cd ${PROJECT_PATH}
-                    source ${VENV_PATH}/bin/activate
                     python3 agents/cost_optimizer_agent.py
                 '''
             }
@@ -65,10 +45,10 @@ pipeline {
 
     post {
         success {
-            echo '✅ IntelliOps Pipeline APPROVED - Deployment successful!'
+            echo '✅ Pipeline APPROVED - Deployment successful!'
         }
         failure {
-            echo '🚫 IntelliOps Pipeline REJECTED - Deployment blocked!'
+            echo '🚫 Pipeline REJECTED - Deployment blocked!'
         }
         always {
             echo '📊 Pipeline complete. Check Grafana for metrics.'
