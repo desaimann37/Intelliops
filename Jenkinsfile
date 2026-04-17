@@ -1,5 +1,21 @@
 pipeline {
-    agent any
+    agent {
+    kubernetes {
+        yaml """
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: python
+    image: python:3.11-slim
+    command:
+    - sleep
+    args:
+    - infinity
+"""
+        defaultContainer 'python'
+    }
+}
 
     environment {
         IMAGE = "alpine:latest"
