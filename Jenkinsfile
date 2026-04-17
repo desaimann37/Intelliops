@@ -47,19 +47,19 @@ spec:
         }
 
         stage('IntelliOps Agent Pipeline') {
-            steps {
-                echo '🤖 Running all 5 AI agents...'
-                sh '''
-                    python3 agents/orchestrator.py > /tmp/agent_result.txt 2>&1
-                    cat /tmp/agent_result.txt
-                    if grep -q "FINAL PIPELINE DECISION: APPROVED" /tmp/agent_result.txt; then
-                        echo "APPROVED" > /tmp/decision.txt
-                    else
-                        echo "REJECTED" > /tmp/decision.txt
-                    fi
-                '''
-            }
-        }
+    steps {
+        echo '🤖 Running all 5 AI agents...'
+        sh '''
+            python3 agents/orchestrator.py 2>&1 | tee /tmp/agent_result.txt
+            if grep -q "INTELLIOPS PIPELINE DECISION: APPROVED" /tmp/agent_result.txt; then
+                echo "APPROVED" > /tmp/decision.txt
+            else
+                echo "REJECTED" > /tmp/decision.txt
+            fi
+        '''
+    }
+}
+        
 
         stage('Deploy via ArgoCD') {
             when {
